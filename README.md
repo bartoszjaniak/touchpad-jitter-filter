@@ -18,9 +18,11 @@ To autostart with Windows, place a shortcut to the `.exe` in `shell:startup`.
 ## How it works
 
 - Intercepts `WM_MOUSEMOVE` via `WH_MOUSE_LL`.
-- Blocks moves ≤12 px within 25 ms (jitter).
+- Detects jitter by tracking **direction changes**: rapid back-and-forth movement (e.g., +x → -x → +x) within 8 px / 25 ms is classified as jitter.
+- Jittery movements are blocked, but their displacement is **accumulated**. When movement resumes in a consistent direction, the accumulated + current movement is **amplified 4×** to compensate for the lost cursor travel.
+- Non-jitter movements pass through normally.
 - Single-instance enforced via a named mutex (`Local\JitterFilterSingleton`).
-- No console window, no runtime dependencies — pure Rust, single `.exe` (~129 KB).
+- No console window, no runtime dependencies — pure Rust, single `.exe` (~130 KB).
 
 ## Build
 

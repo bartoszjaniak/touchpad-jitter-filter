@@ -26,14 +26,17 @@ const ID_TRAY: u32 = 1;
 const ID_EXIT: usize = 100;
 const ID_COFFEE: usize = 101;
 
-const THRESHOLD: i32 = 12;
+const THRESHOLD: i32 = 8;
 const AMPLIFY: i32 = 4;
 
 static mut LAST_X: i32 = 0;
 static mut LAST_Y: i32 = 0;
 static mut LAST_T: Option<Instant> = None;
+static mut LAST_DX: i32 = 0;
+static mut LAST_DY: i32 = 0;
 static mut ACC_X: i32 = 0;
 static mut ACC_Y: i32 = 0;
+static mut IN_JITTER: bool = false;
 static mut SKIP: bool = false;
 
 unsafe extern "system" fn low_level_mouse_proc(
@@ -59,6 +62,11 @@ unsafe extern "system" fn low_level_mouse_proc(
                 LAST_X = pt.pt.x;
                 LAST_Y = pt.pt.y;
                 LAST_T = Some(now);
+                LAST_DX = 0;
+                LAST_DY = 0;
+                ACC_X = 0;
+                ACC_Y = 0;
+                IN_JITTER = false;
                 return 1;
             }
             Some(last) => {
@@ -67,6 +75,9 @@ unsafe extern "system" fn low_level_mouse_proc(
                 if dt > Duration::from_millis(25) {
                     ACC_X = 0;
                     ACC_Y = 0;
+                    IN_JITTER = false;
+                    LAST_DX = 0;
+                    LAST_DY = 0;
                     LAST_X = pt.pt.x;
                     LAST_Y = pt.pt.y;
                     LAST_T = Some(now);
@@ -75,33 +86,51 @@ unsafe extern "system" fn low_level_mouse_proc(
 
                 let dx = pt.pt.x - LAST_X;
                 let dy = pt.pt.y - LAST_Y;
+                let is_small = dx.abs() <= THRESHOLD && dy.abs() <= THRESHOLD;
 
-                if dx.abs() <= THRESHOLD && dy.abs() <= THRESHOLD {
-                    ACC_X += dx;
-                    ACC_Y += dy;
+                if is_small {
+                    let dir_changed = (dx != 0 && LAST_DX != 0 && dx.signum() != LAST_DX.signum())
+                        || (dy != 0 && LAST_DY != 0 && dy.signum() != LAST_DY.signum());
+
+                    LAST_DX = dx;
+                    LAST_DY = dy;
                     LAST_T = Some(now);
 
-                    if ACC_X.abs() > THRESHOLD || ACC_Y.abs() > THRESHOLD {
-                        let rel_x = ACC_X * AMPLIFY;
-                        let rel_y = ACC_Y * AMPLIFY;
+                    if dir_changed {
+                        ACC_X += dx;
+                        ACC_Y += dy;
+                        IN_JITTER = true;
+                        return 1;
+                    }
+
+                    if IN_JITTER {
+                        let total_x = ACC_X + dx * AMPLIFY;
+                        let total_y = ACC_Y + dy * AMPLIFY;
 
                         SKIP = true;
                         let mut input: INPUT = zeroed();
                         input.r#type = INPUT_MOUSE;
                         input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE;
-                        input.Anonymous.mi.dx = rel_x;
-                        input.Anonymous.mi.dy = rel_y;
+                        input.Anonymous.mi.dx = total_x;
+                        input.Anonymous.mi.dy = total_y;
                         SendInput(1, &raw mut input, size_of::<INPUT>() as i32);
 
                         ACC_X = 0;
                         ACC_Y = 0;
+                        IN_JITTER = false;
+                        return 1;
                     }
 
-                    return 1;
+                    LAST_X = pt.pt.x;
+                    LAST_Y = pt.pt.y;
+                    return unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) };
                 }
 
                 ACC_X = 0;
                 ACC_Y = 0;
+                IN_JITTER = false;
+                LAST_DX = 0;
+                LAST_DY = 0;
                 LAST_X = pt.pt.x;
                 LAST_Y = pt.pt.y;
                 LAST_T = Some(now);
@@ -152,7 +181,7 @@ unsafe extern "system" fn wnd_proc(
                 nid.uID = ID_TRAY;
                 nid.uFlags = NIF_INFO;
                 copy_wide(&mut nid.szInfoTitle, &encode_wide("Jitter Filter\0"));
-                copy_wide(&mut nid.szInfo, &encode_wide("Active — filtering trackpad jitter\0"));
+                copy_wide(&mut nid.szInfo, &encode_wide("Active \u{2014} filtering trackpad jitter\0"));
                 nid.dwInfoFlags = NIIF_INFO;
                 Shell_NotifyIconW(NIM_MODIFY, &raw const nid);
             }
@@ -245,13 +274,30 @@ fn main() {
             return;
         }
 
+        let mut icon_path = std::env::current_exe().unwrap_or_default();
+        icon_path.set_file_name("jitter.png");
+        let icon_wide: Vec<u16> = icon_path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+        let hicon = LoadImageW(
+            null_mut(),
+            icon_wide.as_ptr(),
+            IMAGE_ICON,
+            0,
+            0,
+            LR_LOADFROMFILE,
+        );
+        let hicon = if hicon.is_null() {
+            LoadIconW(null_mut(), 32512 as *const u16)
+        } else {
+            hicon as HICON
+        };
+
         let mut nid: NOTIFYICONDATAW = zeroed();
         nid.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
         nid.hWnd = hwnd;
         nid.uID = ID_TRAY;
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         nid.uCallbackMessage = WM_TRAY_ICON;
-        nid.hIcon = LoadIconW(null_mut(), 32512 as *const u16);
+        nid.hIcon = hicon;
         copy_wide(&mut nid.szTip, &encode_wide("Jitter Filter\0"));
 
         Shell_NotifyIconW(NIM_ADD, &raw const nid);
