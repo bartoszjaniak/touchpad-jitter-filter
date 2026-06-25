@@ -1,31 +1,85 @@
 # Touchpad Jitter Filter
 
-Windows tray app that filters trackpad jitter on devices like the Chuwi Minibook X.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![Size: ~130 KB](https://img.shields.io/badge/size-%7E130%20KB-brightgreen)
 
-Low-level mouse hook (`WH_MOUSE_LL`) detects and suppresses small, rapid cursor movements typical of
-cheap touchpad hardware, while amplifying deliberate motion to avoid the "stuck cursor" feeling.
+A Windows system-tray application that filters touchpad jitter using a low-level mouse hook. Designed for devices with noisy touchpad hardware — such as the Chuwi Minibook X — where built-in Windows smoothing is insufficient.
+
+## Features
+
+- **Direction-change detection** — distinguishes jitter (rapid back-and-forth micro-movements) from deliberate slow movement.
+- **Adaptive amplification** — blocked jitter displacement is accumulated and amplified when movement resumes, preventing the "stuck cursor" feeling.
+- **Tray icon** — right-click menu with Exit and Buy Me a Coffee.
+- **Single instance** — multiple launches reuse the running instance.
+- **No runtime dependencies** — static Rust binary, just one `.exe`.
+
+## Quick start
+
+1. Download `jitter-filter.exe` from [Releases](https://github.com/bartoszjaniak/touchpad-jitter-filter/releases).
+2. Run it. A tray icon appears in the notification area.
+3. Done — jitter is filtered immediately.
+
+## Installation
+
+See [Installation guide](docs/installation.md) for:
+- Running from source (`cargo build --release`)
+- Autostart setup (Startup folder / Task Scheduler)
 
 ## Usage
 
-Run `jitter-filter.exe`. A tray icon appears in the notification area.
+| Action | Result |
+|---|---|
+| Run the `.exe` | Tray icon appears, filtering starts |
+| Right-click tray | Menu: Exit / Buy Me a Coffee |
+| Double-click tray | Status balloon |
 
-- **Right-click** → **Exit** to quit.
-- **Right-click** → **Buy me a coffee ☕** to show support.
-- **Double-click** the tray icon to show a status balloon.
+Full usage guide: [docs/usage.md](docs/usage.md)
 
-To autostart with Windows, place a shortcut to the `.exe` in `shell:startup`.
+## Configuration
+
+All parameters are compile-time constants in [`src/main.rs`](src/main.rs):
+
+| Constant | Default | Purpose |
+|---|---|---|
+| `THRESHOLD` | 12 px | Max displacement classified as "small" |
+| `AMPLIFY` | 2× | Amplification for accumulated displacement |
+| `MIN_DIR_CHANGES` | 3 | Direction reversals before confirming jitter |
+| Time window | 25 ms | Max gap considered "continuous" |
+
+Adjust and rebuild: `cargo build --release`.
 
 ## How it works
 
-- Intercepts `WM_MOUSEMOVE` via `WH_MOUSE_LL`.
-- Detects jitter by tracking **direction changes**: rapid back-and-forth movement (e.g., +x → -x → +x) within 8 px / 25 ms is classified as jitter.
-- Jittery movements are blocked, but their displacement is **accumulated**. When movement resumes in a consistent direction, the accumulated + current movement is **amplified 4×** to compensate for the lost cursor travel.
-- Non-jitter movements pass through normally.
-- Single-instance enforced via a named mutex (`Local\JitterFilterSingleton`).
-- No console window, no runtime dependencies — pure Rust, single `.exe` (~130 KB).
+1. Installs a `WH_MOUSE_LL` hook that intercepts all `WM_MOUSEMOVE` events.
+2. Events within 12 px / 25 ms are analysed for **direction changes**:
+   - Frequent reversals (+x → -x → +x) → **jitter** → blocked, displacement accumulated.
+   - Consistent direction → **deliberate** → passed through.
+   - After jitter, accumulated displacement is flushed at 2× via `SendInput` (relative move, no feedback loop).
+3. Big movements or gaps > 25 ms reset the state.
 
-## Build
+Detailed architecture: [docs/architecture.md](docs/architecture.md)
 
-```bash
+## Build from source
+
+```powershell
+git clone https://github.com/bartoszjaniak/touchpad-jitter-filter.git
+cd touchpad-jitter-filter
 cargo build --release
 ```
+
+Requires Rust edition 2024 (MSRV 1.85+).
+
+## Contributing
+
+Issues and pull requests are welcome. See [docs/faq.md](docs/faq.md) for known limitations and tuning advice.
+
+## License
+
+MIT
+
+## Support
+
+If this tool saves you time or frustration, consider buying me a coffee:
+
+[☕ buymeacoffee.com/bartosz.janiak](https://buymeacoffee.com/bartosz.janiak)
