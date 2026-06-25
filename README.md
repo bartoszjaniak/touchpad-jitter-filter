@@ -36,6 +36,16 @@ See [Installation guide](docs/installation.md) for:
 
 Full usage guide: [docs/usage.md](docs/usage.md)
 
+## Autostart
+
+Add the app to Windows startup so it runs automatically on login:
+
+1. Press **`Win + R`**, type `shell:startup`, press Enter.
+2. Create a shortcut to `jitter-filter.exe` in the opened folder.
+3. (Optional) Place `jitter.ico` next to `jitter-filter.exe` for the tray icon.
+
+See [Installation guide](docs/installation.md#autostart-run-on-login) for alternative methods (Task Scheduler).
+
 ## Configuration
 
 All parameters are compile-time constants in [`src/main.rs`](src/main.rs):
