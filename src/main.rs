@@ -257,7 +257,7 @@ fn main() {
         }
 
         let hwnd = CreateWindowExW(
-            0,
+            WS_EX_TOOLWINDOW,
             class_w.as_ptr(),
             class_w.as_ptr(),
             0,
