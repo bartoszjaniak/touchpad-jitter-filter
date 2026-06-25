@@ -245,7 +245,7 @@ fn main() {
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: instance,
-            hIcon: LoadIconW(null_mut(), 32512 as *const u16),
+            hIcon: LoadIconW(null_mut(), IDI_APPLICATION),
             hCursor: null_mut(),
             hbrBackground: null_mut::<core::ffi::c_void>() as HBRUSH,
             lpszMenuName: null_mut(),
@@ -276,7 +276,7 @@ fn main() {
         }
 
         let mut icon_path = std::env::current_exe().unwrap_or_default();
-        icon_path.set_file_name("jitter.png");
+        icon_path.set_file_name("jitter.ico");
         let icon_wide: Vec<u16> = icon_path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
         let hicon = LoadImageW(
             null_mut(),
@@ -287,7 +287,7 @@ fn main() {
             LR_LOADFROMFILE,
         );
         let hicon = if hicon.is_null() {
-            LoadIconW(null_mut(), 32512 as *const u16)
+            LoadIconW(null_mut(), IDI_APPLICATION)
         } else {
             hicon as HICON
         };
