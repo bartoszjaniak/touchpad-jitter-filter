@@ -5,6 +5,7 @@ use core::ptr::null_mut;
 use std::mem::{size_of, zeroed};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::Win32::Graphics::Gdi::HBRUSH;
@@ -28,10 +29,12 @@ const ID_COFFEE: usize = 101;
 const THRESHOLD: i32 = 12;
 const AMPLIFY: i32 = 4;
 
-static mut LAST_PASSED_X: i32 = 0;
-static mut LAST_PASSED_Y: i32 = 0;
-static mut LAST_EVENT_T: Option<Instant> = None;
-static mut JITTERING: bool = false;
+static mut LAST_X: i32 = 0;
+static mut LAST_Y: i32 = 0;
+static mut LAST_T: Option<Instant> = None;
+static mut ACC_X: i32 = 0;
+static mut ACC_Y: i32 = 0;
+static mut SKIP: bool = false;
 
 unsafe extern "system" fn low_level_mouse_proc(
     n_code: i32,
@@ -42,50 +45,66 @@ unsafe extern "system" fn low_level_mouse_proc(
         return unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) };
     }
 
+    if unsafe { SKIP } {
+        unsafe { SKIP = false };
+        return 1;
+    }
+
     let pt = unsafe { &*(l_param as *const MSLLHOOKSTRUCT) };
     let now = Instant::now();
 
     unsafe {
-        match LAST_EVENT_T {
+        match LAST_T {
             None => {
-                LAST_PASSED_X = pt.pt.x;
-                LAST_PASSED_Y = pt.pt.y;
-                LAST_EVENT_T = Some(now);
-                JITTERING = false;
+                LAST_X = pt.pt.x;
+                LAST_Y = pt.pt.y;
+                LAST_T = Some(now);
                 return 1;
             }
             Some(last) => {
-                let dx = (pt.pt.x - LAST_PASSED_X).abs();
-                let dy = (pt.pt.y - LAST_PASSED_Y).abs();
                 let dt = now - last;
 
-                let within_threshold = dx <= THRESHOLD && dy <= THRESHOLD;
-
-                if dt <= Duration::from_millis(25) {
-                    if within_threshold {
-                        JITTERING = true;
-                        LAST_EVENT_T = Some(now);
-                        return 1;
-                    }
-                } else {
-                    JITTERING = false;
+                if dt > Duration::from_millis(25) {
+                    ACC_X = 0;
+                    ACC_Y = 0;
+                    LAST_X = pt.pt.x;
+                    LAST_Y = pt.pt.y;
+                    LAST_T = Some(now);
+                    return unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) };
                 }
 
-                if JITTERING {
-                    let delta_x = (pt.pt.x - LAST_PASSED_X) * AMPLIFY;
-                    let delta_y = (pt.pt.y - LAST_PASSED_Y) * AMPLIFY;
-                    let new_x = LAST_PASSED_X + delta_x;
-                    let new_y = LAST_PASSED_Y + delta_y;
-                    SetCursorPos(new_x, new_y);
-                    LAST_PASSED_X = new_x;
-                    LAST_PASSED_Y = new_y;
-                    LAST_EVENT_T = Some(now);
+                let dx = pt.pt.x - LAST_X;
+                let dy = pt.pt.y - LAST_Y;
+
+                if dx.abs() <= THRESHOLD && dy.abs() <= THRESHOLD {
+                    ACC_X += dx;
+                    ACC_Y += dy;
+                    LAST_T = Some(now);
+
+                    if ACC_X.abs() > THRESHOLD || ACC_Y.abs() > THRESHOLD {
+                        let rel_x = ACC_X * AMPLIFY;
+                        let rel_y = ACC_Y * AMPLIFY;
+
+                        SKIP = true;
+                        let mut input: INPUT = zeroed();
+                        input.r#type = INPUT_MOUSE;
+                        input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE;
+                        input.Anonymous.mi.dx = rel_x;
+                        input.Anonymous.mi.dy = rel_y;
+                        SendInput(1, &raw mut input, size_of::<INPUT>() as i32);
+
+                        ACC_X = 0;
+                        ACC_Y = 0;
+                    }
+
                     return 1;
                 }
 
-                LAST_PASSED_X = pt.pt.x;
-                LAST_PASSED_Y = pt.pt.y;
-                LAST_EVENT_T = Some(now);
+                ACC_X = 0;
+                ACC_Y = 0;
+                LAST_X = pt.pt.x;
+                LAST_Y = pt.pt.y;
+                LAST_T = Some(now);
             }
         }
     }
