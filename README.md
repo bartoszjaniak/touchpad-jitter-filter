@@ -6,6 +6,10 @@
 
 A Windows system-tray application that filters touchpad jitter using a low-level mouse hook. Designed for devices with noisy touchpad hardware — such as the Chuwi Minibook X — where built-in Windows smoothing is insufficient.
 
+If this tool saves you time or frustration, consider buying me a coffee:
+
+[☕ buymeacoffee.com/bartosz.janiak](https://buymeacoffee.com/bartosz.janiak)
+
 ## Features
 
 - **Direction-change detection** — distinguishes jitter (rapid back-and-forth micro-movements) from deliberate slow movement.
@@ -87,9 +91,3 @@ Issues and pull requests are welcome. See [docs/faq.md](docs/faq.md) for known l
 ## License
 
 MIT
-
-## Support
-
-If this tool saves you time or frustration, consider buying me a coffee:
-
-[☕ buymeacoffee.com/bartosz.janiak](https://buymeacoffee.com/bartosz.janiak)
