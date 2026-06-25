@@ -26,8 +26,9 @@ const ID_TRAY: u32 = 1;
 const ID_EXIT: usize = 100;
 const ID_COFFEE: usize = 101;
 
-const THRESHOLD: i32 = 8;
-const AMPLIFY: i32 = 4;
+const THRESHOLD: i32 = 12;
+const AMPLIFY: i32 = 2;
+const MIN_DIR_CHANGES: u32 = 3;
 
 static mut LAST_X: i32 = 0;
 static mut LAST_Y: i32 = 0;
