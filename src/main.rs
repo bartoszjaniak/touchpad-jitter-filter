@@ -9,6 +9,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::Win32::Graphics::Gdi::HBRUSH;
+use windows_sys::Win32::System::Threading::*;
 
 unsafe extern "system" {
     fn GetModuleHandleW(lpModuleName: *const u16) -> HINSTANCE;
@@ -314,6 +315,8 @@ fn main() {
             DestroyWindow(hwnd);
             return;
         }
+
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
         let mut msg = MSG {
             hwnd: null_mut(),

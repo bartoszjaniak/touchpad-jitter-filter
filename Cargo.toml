@@ -14,4 +14,5 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell",
     "Win32_Graphics_Gdi",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Threading",
 ]}
