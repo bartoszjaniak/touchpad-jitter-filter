@@ -30,15 +30,16 @@ const ID_TRAY: u32 = 1;
 const ID_EXIT: usize = 100;
 const ID_COFFEE: usize = 101;
 
-const THRESHOLD: f64 = 30.0;
-const ANGLE_THRESHOLD: f64 = 45.0f64.to_radians();
+const MIN_PATH: i32 = 10;
+const JITTER_RATIO_SQ: i32 = 3;
 const TIME_RESET_MS: u64 = 60;
 
 static mut LAST_X: i32 = 0;
 static mut LAST_Y: i32 = 0;
 static mut LAST_T: Option<Instant> = None;
-static mut PREV_DX: i32 = 0;
-static mut PREV_DY: i32 = 0;
+static mut ACC_DX: i32 = 0;
+static mut ACC_DY: i32 = 0;
+static mut ACC_PATH: i32 = 0;
 
 unsafe extern "system" fn low_level_mouse_proc(
     n_code: i32,
@@ -58,48 +59,54 @@ unsafe extern "system" fn low_level_mouse_proc(
                 LAST_X = pt.pt.x;
                 LAST_Y = pt.pt.y;
                 LAST_T = Some(now);
-                PREV_DX = 0;
-                PREV_DY = 0;
+                ACC_DX = 0;
+                ACC_DY = 0;
+                ACC_PATH = 0;
                 return 1;
             }
             Some(last) => {
                 let dt = now - last;
 
                 if dt > Duration::from_millis(TIME_RESET_MS) {
-                    PREV_DX = 0;
-                    PREV_DY = 0;
                     LAST_X = pt.pt.x;
                     LAST_Y = pt.pt.y;
                     LAST_T = Some(now);
+                    ACC_DX = 0;
+                    ACC_DY = 0;
+                    ACC_PATH = 0;
                     return unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) };
                 }
 
                 let dx = pt.pt.x - LAST_X;
                 let dy = pt.pt.y - LAST_Y;
-                let speed_sq = (dx * dx + dy * dy) as f64;
-                let speed = speed_sq.sqrt();
 
-                if speed <= THRESHOLD && (PREV_DX != 0 || PREV_DY != 0) && speed > 1.0 {
-                    let prev_speed = ((PREV_DX * PREV_DX + PREV_DY * PREV_DY) as f64).sqrt();
-                    if prev_speed > 0.0 {
-                        let dot = (dx * PREV_DX + dy * PREV_DY) as f64;
-                        let cos_a = (dot / (speed * prev_speed)).clamp(-1.0, 1.0);
-                        let angle = cos_a.acos();
-
-                        if angle > ANGLE_THRESHOLD {
-                            PREV_DX = dx;
-                            PREV_DY = dy;
-                            LAST_T = Some(now);
-                            return 1;
-                        }
-                    }
-                }
-
-                PREV_DX = dx;
-                PREV_DY = dy;
                 LAST_X = pt.pt.x;
                 LAST_Y = pt.pt.y;
                 LAST_T = Some(now);
+
+                let adx = dx.abs();
+                let ady = dy.abs();
+
+                ACC_DX += dx;
+                ACC_DY += dy;
+                ACC_PATH += adx + ady;
+
+                if ACC_PATH >= MIN_PATH {
+                    let net_sq = ACC_DX * ACC_DX + ACC_DY * ACC_DY;
+                    let path_sq = ACC_PATH * ACC_PATH;
+
+                    if net_sq * JITTER_RATIO_SQ < path_sq {
+                        ACC_DX = 0;
+                        ACC_DY = 0;
+                        ACC_PATH = 0;
+                        return 1;
+                    }
+
+                    ACC_DX = 0;
+                    ACC_DY = 0;
+                    ACC_PATH = 0;
+                }
+
                 unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) }
             }
         }
