@@ -10,6 +10,8 @@ use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::Win32::Graphics::Gdi::HBRUSH;
 use windows_sys::Win32::System::Threading::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 unsafe extern "system" {
     fn GetModuleHandleW(lpModuleName: *const u16) -> HINSTANCE;
@@ -19,6 +21,8 @@ unsafe extern "system" {
         lpName: *const u16,
     ) -> *mut core::ffi::c_void;
     fn CloseHandle(hObject: *mut core::ffi::c_void) -> BOOL;
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+    fn timeEndPeriod(uPeriod: u32) -> u32;
 }
 
 const CLASS_NAME: &str = "JitterFilterWnd";
@@ -304,17 +308,44 @@ fn main() {
 
         Shell_NotifyIconW(NIM_ADD, &raw const nid);
 
-        let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), instance, 0);
+        let running = Arc::new(AtomicBool::new(true));
+        let running_hook = running.clone();
 
-        if hook.is_null() {
-            let mut nid2: NOTIFYICONDATAW = zeroed();
-            nid2.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
-            nid2.hWnd = hwnd;
-            nid2.uID = ID_TRAY;
-            Shell_NotifyIconW(NIM_DELETE, &raw const nid2);
-            DestroyWindow(hwnd);
-            return;
-        }
+        let hook_handle = std::thread::spawn(move || unsafe {
+            timeBeginPeriod(1);
+
+            let instance = GetModuleHandleW(null_mut());
+            let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), instance, 0);
+
+            if !hook.is_null() {
+                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+
+                let mut msg = MSG {
+                    hwnd: null_mut(),
+                    message: 0,
+                    wParam: 0,
+                    lParam: 0,
+                    time: 0,
+                    pt: POINT { x: 0, y: 0 },
+                };
+
+                while running_hook.load(Ordering::Relaxed) {
+                    while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
+                        if msg.message == WM_QUIT {
+                            running_hook.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                        TranslateMessage(&raw const msg);
+                        DispatchMessageW(&raw const msg);
+                    }
+                    Sleep(1);
+                }
+
+                UnhookWindowsHookEx(hook);
+            }
+
+            timeEndPeriod(1);
+        });
 
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
@@ -332,6 +363,7 @@ fn main() {
             DispatchMessageW(&raw const msg);
         }
 
-        UnhookWindowsHookEx(hook);
+        running.store(false, Ordering::Relaxed);
+        hook_handle.join().unwrap();
     }
 }
