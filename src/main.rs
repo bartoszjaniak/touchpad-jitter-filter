@@ -31,7 +31,7 @@ const ID_TRAY: u32 = 1;
 const ID_EXIT: usize = 100;
 const ID_COFFEE: usize = 101;
 
-const THRESHOLD: i32 = 12;
+const THRESHOLD: i32 = 30;
 const AMPLIFY: i32 = 2;
 const MIN_DIR_CHANGES: u32 = 3;
 
@@ -78,7 +78,7 @@ unsafe extern "system" fn low_level_mouse_proc(
             Some(last) => {
                 let dt = now - last;
 
-                if dt > Duration::from_millis(25) {
+                if dt > Duration::from_millis(60) {
                     ACC_X = 0;
                     ACC_Y = 0;
                     IN_JITTER = false;
