@@ -5,7 +5,6 @@ use core::ptr::null_mut;
 use std::mem::{size_of, zeroed};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::*;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::Win32::Graphics::Gdi::HBRUSH;
@@ -31,19 +30,15 @@ const ID_TRAY: u32 = 1;
 const ID_EXIT: usize = 100;
 const ID_COFFEE: usize = 101;
 
-const THRESHOLD: i32 = 30;
-const AMPLIFY: i32 = 2;
-const MIN_DIR_CHANGES: u32 = 3;
+const THRESHOLD: f64 = 30.0;
+const ANGLE_THRESHOLD: f64 = 45.0f64.to_radians();
+const TIME_RESET_MS: u64 = 60;
 
 static mut LAST_X: i32 = 0;
 static mut LAST_Y: i32 = 0;
 static mut LAST_T: Option<Instant> = None;
-static mut LAST_DX: i32 = 0;
-static mut LAST_DY: i32 = 0;
-static mut ACC_X: i32 = 0;
-static mut ACC_Y: i32 = 0;
-static mut IN_JITTER: bool = false;
-static mut SKIP: bool = false;
+static mut PREV_DX: i32 = 0;
+static mut PREV_DY: i32 = 0;
 
 unsafe extern "system" fn low_level_mouse_proc(
     n_code: i32,
@@ -52,11 +47,6 @@ unsafe extern "system" fn low_level_mouse_proc(
 ) -> LRESULT {
     if n_code < 0 || w_param as u32 != WM_MOUSEMOVE {
         return unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) };
-    }
-
-    if unsafe { SKIP } {
-        unsafe { SKIP = false };
-        return 1;
     }
 
     let pt = unsafe { &*(l_param as *const MSLLHOOKSTRUCT) };
@@ -68,22 +58,16 @@ unsafe extern "system" fn low_level_mouse_proc(
                 LAST_X = pt.pt.x;
                 LAST_Y = pt.pt.y;
                 LAST_T = Some(now);
-                LAST_DX = 0;
-                LAST_DY = 0;
-                ACC_X = 0;
-                ACC_Y = 0;
-                IN_JITTER = false;
+                PREV_DX = 0;
+                PREV_DY = 0;
                 return 1;
             }
             Some(last) => {
                 let dt = now - last;
 
-                if dt > Duration::from_millis(60) {
-                    ACC_X = 0;
-                    ACC_Y = 0;
-                    IN_JITTER = false;
-                    LAST_DX = 0;
-                    LAST_DY = 0;
+                if dt > Duration::from_millis(TIME_RESET_MS) {
+                    PREV_DX = 0;
+                    PREV_DY = 0;
                     LAST_X = pt.pt.x;
                     LAST_Y = pt.pt.y;
                     LAST_T = Some(now);
@@ -92,59 +76,34 @@ unsafe extern "system" fn low_level_mouse_proc(
 
                 let dx = pt.pt.x - LAST_X;
                 let dy = pt.pt.y - LAST_Y;
-                let is_small = dx.abs() <= THRESHOLD && dy.abs() <= THRESHOLD;
+                let speed_sq = (dx * dx + dy * dy) as f64;
+                let speed = speed_sq.sqrt();
 
-                if is_small {
-                    let dir_changed = (dx != 0 && LAST_DX != 0 && dx.signum() != LAST_DX.signum())
-                        || (dy != 0 && LAST_DY != 0 && dy.signum() != LAST_DY.signum());
+                if speed <= THRESHOLD && (PREV_DX != 0 || PREV_DY != 0) && speed > 1.0 {
+                    let prev_speed = ((PREV_DX * PREV_DX + PREV_DY * PREV_DY) as f64).sqrt();
+                    if prev_speed > 0.0 {
+                        let dot = (dx * PREV_DX + dy * PREV_DY) as f64;
+                        let cos_a = (dot / (speed * prev_speed)).clamp(-1.0, 1.0);
+                        let angle = cos_a.acos();
 
-                    LAST_DX = dx;
-                    LAST_DY = dy;
-                    LAST_T = Some(now);
-
-                    if dir_changed {
-                        ACC_X += dx;
-                        ACC_Y += dy;
-                        IN_JITTER = true;
-                        return 1;
+                        if angle > ANGLE_THRESHOLD {
+                            PREV_DX = dx;
+                            PREV_DY = dy;
+                            LAST_T = Some(now);
+                            return 1;
+                        }
                     }
-
-                    if IN_JITTER {
-                        let total_x = ACC_X + dx * AMPLIFY;
-                        let total_y = ACC_Y + dy * AMPLIFY;
-
-                        SKIP = true;
-                        let mut input: INPUT = zeroed();
-                        input.r#type = INPUT_MOUSE;
-                        input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE;
-                        input.Anonymous.mi.dx = total_x;
-                        input.Anonymous.mi.dy = total_y;
-                        SendInput(1, &raw mut input, size_of::<INPUT>() as i32);
-
-                        ACC_X = 0;
-                        ACC_Y = 0;
-                        IN_JITTER = false;
-                        return 1;
-                    }
-
-                    LAST_X = pt.pt.x;
-                    LAST_Y = pt.pt.y;
-                    return unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) };
                 }
 
-                ACC_X = 0;
-                ACC_Y = 0;
-                IN_JITTER = false;
-                LAST_DX = 0;
-                LAST_DY = 0;
+                PREV_DX = dx;
+                PREV_DY = dy;
                 LAST_X = pt.pt.x;
                 LAST_Y = pt.pt.y;
                 LAST_T = Some(now);
+                unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) }
             }
         }
     }
-
-    unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) }
 }
 
 unsafe extern "system" fn wnd_proc(
