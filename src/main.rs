@@ -30,8 +30,9 @@ const ID_TRAY: u32 = 1;
 const ID_EXIT: usize = 100;
 const ID_COFFEE: usize = 101;
 
-const MIN_PATH: i32 = 10;
+const MIN_PATH: i32 = 5;
 const JITTER_RATIO_SQ: i32 = 3;
+const DEAD_ZONE: i32 = 2;
 const TIME_RESET_MS: u64 = 60;
 
 static mut LAST_X: i32 = 0;
@@ -86,6 +87,10 @@ unsafe extern "system" fn low_level_mouse_proc(
 
                 let adx = dx.abs();
                 let ady = dy.abs();
+
+                if adx + ady <= DEAD_ZONE {
+                    return 1;
+                }
 
                 ACC_DX += dx;
                 ACC_DY += dy;
