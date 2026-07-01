@@ -5,6 +5,7 @@ use core::ptr::null_mut;
 use std::mem::{size_of, zeroed};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::Win32::Graphics::Gdi::HBRUSH;
@@ -30,15 +31,24 @@ const ID_TRAY: u32 = 1;
 const ID_EXIT: usize = 100;
 const ID_COFFEE: usize = 101;
 
-const THRESHOLD: f64 = 30.0;
-const ANGLE_THRESHOLD: f64 = 45.0f64.to_radians();
+const INTERVAL_MS: u64 = 100;
+const RATIO_THRESHOLD: i32 = 15;
 const TIME_RESET_MS: u64 = 60;
+
+#[derive(PartialEq)]
+enum FilterState { Clean, Suppress }
 
 static mut LAST_X: i32 = 0;
 static mut LAST_Y: i32 = 0;
 static mut LAST_T: Option<Instant> = None;
-static mut PREV_DX: i32 = 0;
-static mut PREV_DY: i32 = 0;
+static mut STATE: FilterState = FilterState::Clean;
+static mut INTV_START: Option<Instant> = None;
+static mut START_X: i32 = 0;
+static mut START_Y: i32 = 0;
+static mut ACC_DX: i32 = 0;
+static mut ACC_DY: i32 = 0;
+static mut ACC_PATH: i32 = 0;
+static mut SKIP: bool = false;
 
 unsafe extern "system" fn low_level_mouse_proc(
     n_code: i32,
@@ -47,6 +57,11 @@ unsafe extern "system" fn low_level_mouse_proc(
 ) -> LRESULT {
     if n_code < 0 || w_param as u32 != WM_MOUSEMOVE {
         return unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) };
+    }
+
+    if unsafe { SKIP } {
+        unsafe { SKIP = false };
+        return 1;
     }
 
     let pt = unsafe { &*(l_param as *const MSLLHOOKSTRUCT) };
@@ -58,45 +73,76 @@ unsafe extern "system" fn low_level_mouse_proc(
                 LAST_X = pt.pt.x;
                 LAST_Y = pt.pt.y;
                 LAST_T = Some(now);
-                PREV_DX = 0;
-                PREV_DY = 0;
+                STATE = FilterState::Clean;
+                INTV_START = None;
+                ACC_DX = 0;
+                ACC_DY = 0;
+                ACC_PATH = 0;
                 return 1;
             }
             Some(last) => {
                 let dt = now - last;
 
                 if dt > Duration::from_millis(TIME_RESET_MS) {
-                    PREV_DX = 0;
-                    PREV_DY = 0;
                     LAST_X = pt.pt.x;
                     LAST_Y = pt.pt.y;
                     LAST_T = Some(now);
+                    STATE = FilterState::Clean;
+                    INTV_START = None;
+                    ACC_DX = 0;
+                    ACC_DY = 0;
+                    ACC_PATH = 0;
                     return unsafe { CallNextHookEx(null_mut(), n_code, w_param, l_param) };
+                }
+
+                let start: *mut Option<Instant> = &raw mut INTV_START;
+                if (*start).is_none() {
+                    *start = Some(now);
+                    START_X = pt.pt.x;
+                    START_Y = pt.pt.y;
                 }
 
                 let dx = pt.pt.x - LAST_X;
                 let dy = pt.pt.y - LAST_Y;
-                let speed_sq = (dx * dx + dy * dy) as f64;
-                let speed = speed_sq.sqrt();
 
-                if speed <= THRESHOLD && (PREV_DX != 0 || PREV_DY != 0) && speed > 1.0 {
-                    let prev_speed = ((PREV_DX * PREV_DX + PREV_DY * PREV_DY) as f64).sqrt();
-                    if prev_speed > 0.0 {
-                        let dot = (dx * PREV_DX + dy * PREV_DY) as f64;
-                        let cos_a = (dot / (speed * prev_speed)).clamp(-1.0, 1.0);
-                        let angle = cos_a.acos();
+                ACC_DX += dx;
+                ACC_DY += dy;
+                ACC_PATH += dx.abs() + dy.abs();
 
-                        if angle > ANGLE_THRESHOLD {
-                            PREV_DX = dx;
-                            PREV_DY = dy;
-                            LAST_T = Some(now);
-                            return 1;
+                let elapsed = now - (*start).unwrap();
+                if elapsed >= Duration::from_millis(INTERVAL_MS) {
+                    let net = ACC_DX.abs() + ACC_DY.abs();
+                    let is_jitter = net == 0 || ACC_PATH * 10 > RATIO_THRESHOLD * net;
+
+                    if is_jitter {
+                        let corr_x = START_X - pt.pt.x;
+                        let corr_y = START_Y - pt.pt.y;
+                        if corr_x != 0 || corr_y != 0 {
+                            SKIP = true;
+                            let mut input: INPUT = zeroed();
+                            input.r#type = INPUT_MOUSE;
+                            input.Anonymous.mi.dwFlags = MOUSEEVENTF_MOVE;
+                            input.Anonymous.mi.dx = corr_x;
+                            input.Anonymous.mi.dy = corr_y;
+                            SendInput(1, &raw mut input, size_of::<INPUT>() as i32);
                         }
+                        STATE = FilterState::Suppress;
+                    } else {
+                        STATE = FilterState::Clean;
                     }
+
+                    *start = Some(now);
+                    START_X = pt.pt.x;
+                    START_Y = pt.pt.y;
+                    ACC_DX = 0;
+                    ACC_DY = 0;
+                    ACC_PATH = 0;
                 }
 
-                PREV_DX = dx;
-                PREV_DY = dy;
+                if STATE == FilterState::Suppress {
+                    return 1;
+                }
+
                 LAST_X = pt.pt.x;
                 LAST_Y = pt.pt.y;
                 LAST_T = Some(now);
